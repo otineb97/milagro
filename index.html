@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Extractor de Imágenes de Amazon</title>
+    <title>Extractor de Imágenes de Amazon (Corregido)</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -10,12 +10,8 @@
             padding: 20px;
             text-align: center;
         }
-        h1 {
-            color: #333;
-        }
-        input[type="file"] {
-            margin: 20px;
-        }
+        h1 { color: #333; }
+        input[type="file"] { margin: 20px; }
         button {
             background-color: #4CAF50;
             color: white;
@@ -24,17 +20,9 @@
             cursor: pointer;
             margin: 5px;
         }
-        button:hover {
-            background-color: #45a049;
-        }
-        button:disabled {
-            background-color: #888;
-            cursor: not-allowed;
-        }
-        #resultado {
-            margin-top: 20px;
-            color: #333;
-        }
+        button:hover { background-color: #45a049; }
+        button:disabled { background-color: #888; cursor: not-allowed; }
+        #resultado { margin-top: 20px; color: #333; }
         #progressBar {
             width: 100%;
             background-color: #ddd;
@@ -48,7 +36,6 @@
             border-radius: 5px;
             transition: width 0.5s;
         }
-        /* Estilo para el toast (notificación) */
         #toast {
             position: fixed;
             bottom: 20px;
@@ -70,21 +57,12 @@
 <input type="file" id="fileInput" accept=".csv">
 <br>
 <button id="startButton" onclick="startProcess()">Iniciar Proceso</button>
-<button id="pauseButton" onclick="togglePause()" disabled>Pausar Proceso</button>
-<button id="cancelButton" onclick="cancelAndDownload()" disabled>Cancelar y Descargar</button>
 
 <div id="resultado"></div>
 <div id="progressBar"><div></div></div>
 <div id="toast"></div>
 
 <script>
-    // Variables globales para controlar el proceso
-    let isPaused = false;
-    let cancelProcess = false;
-    let resultadoGlobal = [];
-    let totalProducts = 0;
-
-    // Función para leer el archivo CSV
     function leerCSV(file) {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -94,14 +72,14 @@
         });
     }
 
-    // Función para obtener la URL de la imagen principal del producto
     async function obtenerImagen(url) {
         try {
-            const response = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
-            const text = await response.text();
+            const proxy = 'https://api.allorigins.win/get?url=';
+            const response = await fetch(proxy + encodeURIComponent(url));
+            const data = await response.json();
             const parser = new DOMParser();
-            const doc = parser.parseFromString(text, "text/html");
-            const imagen = doc.querySelector("#landingImage");
+            const doc = parser.parseFromString(data.contents, "text/html");
+            const imagen = doc.querySelector('#landingImage');
             return imagen ? imagen.src : "Imagen no encontrada";
         } catch (error) {
             console.error(`Error al obtener la imagen de ${url}`, error);
@@ -109,122 +87,53 @@
         }
     }
 
-    // Función para mostrar un toast (notificación) por 2 segundos
     function showToast(message) {
         const toast = document.getElementById("toast");
         toast.textContent = message;
         toast.style.opacity = 1;
-        setTimeout(() => {
-            toast.style.opacity = 0;
-        }, 2000);
+        setTimeout(() => toast.style.opacity = 0, 2000);
     }
 
-    // Función para iniciar el proceso
     async function startProcess() {
-        // Reinicia variables y botones
-        isPaused = false;
-        cancelProcess = false;
-        resultadoGlobal = [];
-        document.getElementById("startButton").disabled = true;
-        document.getElementById("pauseButton").disabled = false;
-        document.getElementById("cancelButton").disabled = false;
-
         const archivo = document.getElementById('fileInput').files[0];
-        if (!archivo) {
-            showToast("Por favor, selecciona un archivo CSV.");
-            return;
-        }
+        if (!archivo) return showToast("Por favor, selecciona un archivo CSV.");
 
         const csvTexto = await leerCSV(archivo);
-        const lineas = csvTexto.split("\n")
-            .map(line => line.replace(/\r/g, "").trim())
-            .filter(line => line !== "");
-        if (lineas.length === 0) {
-            showToast("El archivo CSV está vacío.");
-            return;
-        }
+        const lineas = csvTexto.split("\n").map(line => line.replace(/\r/g, "").trim()).filter(line => line !== "");
+        if (lineas.length === 0) return showToast("El archivo CSV está vacío.");
 
         const encabezados = lineas[0].split(",").map(h => h.trim().toLowerCase());
         const urlIndex = encabezados.indexOf("url");
-        if (urlIndex === -1) {
-            showToast("El CSV debe tener una columna 'URL'.");
-            return;
-        }
+        if (urlIndex === -1) return showToast("El CSV debe tener una columna 'URL'.");
 
-        resultadoGlobal.push("URL,Imagen");
-        totalProducts = lineas.length - 1;
+        let resultadoGlobal = ["URL,Imagen"];
         const resultadoDiv = document.getElementById("resultado");
         const progressBar = document.getElementById("progressBar").firstElementChild;
 
         for (let i = 1; i < lineas.length; i++) {
-            // Si se solicita cancelar, se rompe el bucle
-            if (cancelProcess) break;
-
-            // Si está pausado, espera hasta reanudar
-            while (isPaused) {
-                await new Promise(resolve => setTimeout(resolve, 100));
-            }
-
             const columnas = lineas[i].split(",").map(c => c.trim().replace(/"/g, ""));
             const url = columnas[urlIndex];
             if (url) {
-                resultadoDiv.innerHTML = `Procesando ${i} de ${totalProducts}...`;
+                resultadoDiv.innerHTML = `Procesando ${i} de ${lineas.length - 1}...`;
                 const imagenUrl = await obtenerImagen(url);
                 resultadoGlobal.push(`${url},${imagenUrl}`);
-
-                if (imagenUrl === "Imagen no encontrada" || imagenUrl === "Error") {
-                    showToast(`⚠️ No se pudo descargar la imagen de: ${url}`);
-                } else {
-                    showToast(`✅ Imagen descargada de: ${url}`);
-                }
-
-                progressBar.style.width = `${((i / totalProducts) * 100).toFixed(2)}%`;
-
-                // Pausa de 3 segundos para simular comportamiento humano (20 productos por minuto)
-                await new Promise(resolve => setTimeout(resolve, 3000));
+                progressBar.style.width = `${((i / (lineas.length - 1)) * 100).toFixed(2)}%`;
             }
         }
 
         resultadoDiv.innerHTML = "✅ ¡Proceso finalizado! Descargando el archivo...";
         descargarCSV(resultadoGlobal.join("\n"), "productos_con_imagenes.csv");
-
-        // Reinicia botones al finalizar
-        document.getElementById("startButton").disabled = false;
-        document.getElementById("pauseButton").disabled = true;
-        document.getElementById("cancelButton").disabled = true;
     }
 
-    // Función para pausar o reanudar el proceso
-    function togglePause() {
-        isPaused = !isPaused;
-        const pauseButton = document.getElementById("pauseButton");
-        if (isPaused) {
-            pauseButton.textContent = "Reanudar Proceso";
-            showToast("Proceso pausado.");
-        } else {
-            pauseButton.textContent = "Pausar Proceso";
-            showToast("Proceso reanudado.");
-        }
-    }
-
-    // Función para cancelar el proceso y descargar los resultados parciales
-    function cancelAndDownload() {
-        cancelProcess = true;
-        showToast("Proceso cancelado. Descargando resultados parciales.");
-        // Al salir del bucle, se descargará el CSV con los resultados hasta el momento.
-    }
-
-    // Función para descargar el CSV generado
     function descargarCSV(contenido, nombreArchivo) {
         const blob = new Blob([contenido], { type: "text/csv" });
-        const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
-        link.href = url;
+        link.href = URL.createObjectURL(blob);
         link.download = nombreArchivo;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-        URL.revokeObjectURL(url);
+        URL.revokeObjectURL(link.href);
     }
 </script>
 
