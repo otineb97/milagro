@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Extractor de Imágenes de Amazon</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 20px;
+            text-align: center;
+        }
+        h1 {
+            color: #333;
+        }
+        input[type="file"] {
+            margin: 20px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #888;
+            cursor: not-allowed;
+        }
+        #resultado {
+            margin-top: 20px;
+            color: #333;
+        }
+        #progressBar {
+            width: 100%;
+            background-color: #ddd;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+        #progressBar div {
+            height: 20px;
+            width: 0%;
+            background-color: #4CAF50;
+            border-radius: 5px;
+            transition: width 0.5s;
+        }
+        /* Estilo para el toast (notificación) */
+        #toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: #fff;
+            padding: 10px 20px;
+            border-radius: 5px;
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.5s;
+        }
+    </style>
+</head>
+<body>
+
+<h1>Extractor de Imágenes de Productos Amazon</h1>
+
+<input type="file" id="fileInput" accept=".csv">
+<br>
+<button id="startButton" onclick="startProcess()">Iniciar Proceso</button>
+<button id="pauseButton" onclick="togglePause()" disabled>Pausar Proceso</button>
+<button id="cancelButton" onclick="cancelAndDownload()" disabled>Cancelar y Descargar</button>
+
+<div id="resultado"></div>
+<div id="progressBar"><div></div></div>
+<div id="toast"></div>
+
+<script>
+    // Variables globales para controlar el proceso
+    let isPaused = false;
+    let cancelProcess = false;
+    let resultadoGlobal = [];
+    let totalProducts = 0;
+
+    // Función para leer el archivo CSV
+    function leerCSV(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (event) => resolve(event.target.result);
+            reader.onerror = (error) => reject(error);
+            reader.readAsText(file);
+        });
+    }
+
+    // Función para obtener la URL de la imagen principal del producto
+    async function obtenerImagen(url) {
+        try {
+            const response = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+            const text = await response.text();
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(text, "text/html");
+            const imagen = doc.querySelector("#landingImage");
+            return imagen ? imagen.src : "Imagen no encontrada";
+        } catch (error) {
+            console.error(`Error al obtener la imagen de ${url}`, error);
+            return "Error";
+        }
+    }
+
+    // Función para mostrar un toast (notificación) por 2 segundos
+    function showToast(message) {
+        const toast = document.getElementById("toast");
+        toast.textContent = message;
+        toast.style.opacity = 1;
+        setTimeout(() => {
+            toast.style.opacity = 0;
+        }, 2000);
+    }
+
+    // Función para iniciar el proceso
+    async function startProcess() {
+        // Reinicia variables y botones
+        isPaused = false;
+        cancelProcess = false;
+        resultadoGlobal = [];
+        document.getElementById("startButton").disabled = true;
+        document.getElementById("pauseButton").disabled = false;
+        document.getElementById("cancelButton").disabled = false;
+
+        const archivo = document.getElementById('fileInput').files[0];
+        if (!archivo) {
+            showToast("Por favor, selecciona un archivo CSV.");
+            return;
+        }
+
+        const csvTexto = await leerCSV(archivo);
+        const lineas = csvTexto.split("\n")
+            .map(line => line.replace(/\r/g, "").trim())
+            .filter(line => line !== "");
+        if (lineas.length === 0) {
+            showToast("El archivo CSV está vacío.");
+            return;
+        }
+
+        const encabezados = lineas[0].split(",").map(h => h.trim().toLowerCase());
+        const urlIndex = encabezados.indexOf("url");
+        if (urlIndex === -1) {
+            showToast("El CSV debe tener una columna 'URL'.");
+            return;
+        }
+
+        resultadoGlobal.push("URL,Imagen");
+        totalProducts = lineas.length - 1;
+        const resultadoDiv = document.getElementById("resultado");
+        const progressBar = document.getElementById("progressBar").firstElementChild;
+
+        for (let i = 1; i < lineas.length; i++) {
+            // Si se solicita cancelar, se rompe el bucle
+            if (cancelProcess) break;
+
+            // Si está pausado, espera hasta reanudar
+            while (isPaused) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+
+            const columnas = lineas[i].split(",").map(c => c.trim().replace(/"/g, ""));
+            const url = columnas[urlIndex];
+            if (url) {
+                resultadoDiv.innerHTML = `Procesando ${i} de ${totalProducts}...`;
+                const imagenUrl = await obtenerImagen(url);
+                resultadoGlobal.push(`${url},${imagenUrl}`);
+
+                if (imagenUrl === "Imagen no encontrada" || imagenUrl === "Error") {
+                    showToast(`⚠️ No se pudo descargar la imagen de: ${url}`);
+                } else {
+                    showToast(`✅ Imagen descargada de: ${url}`);
+                }
+
+                progressBar.style.width = `${((i / totalProducts) * 100).toFixed(2)}%`;
+
+                // Pausa de 3 segundos para simular comportamiento humano (20 productos por minuto)
+                await new Promise(resolve => setTimeout(resolve, 3000));
+            }
+        }
+
+        resultadoDiv.innerHTML = "✅ ¡Proceso finalizado! Descargando el archivo...";
+        descargarCSV(resultadoGlobal.join("\n"), "productos_con_imagenes.csv");
+
+        // Reinicia botones al finalizar
+        document.getElementById("startButton").disabled = false;
+        document.getElementById("pauseButton").disabled = true;
+        document.getElementById("cancelButton").disabled = true;
+    }
+
+    // Función para pausar o reanudar el proceso
+    function togglePause() {
+        isPaused = !isPaused;
+        const pauseButton = document.getElementById("pauseButton");
+        if (isPaused) {
+            pauseButton.textContent = "Reanudar Proceso";
+            showToast("Proceso pausado.");
+        } else {
+            pauseButton.textContent = "Pausar Proceso";
+            showToast("Proceso reanudado.");
+        }
+    }
+
+    // Función para cancelar el proceso y descargar los resultados parciales
+    function cancelAndDownload() {
+        cancelProcess = true;
+        showToast("Proceso cancelado. Descargando resultados parciales.");
+        // Al salir del bucle, se descargará el CSV con los resultados hasta el momento.
+    }
+
+    // Función para descargar el CSV generado
+    function descargarCSV(contenido, nombreArchivo) {
+        const blob = new Blob([contenido], { type: "text/csv" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = nombreArchivo;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    }
+</script>
+
+</body>
+</html>
